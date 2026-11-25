@@ -1,0 +1,458 @@
+# Windows Server 2008 SP2 Standard (Full), x86, installed unattended.
+# Apply from the repository root (requires CDI and the openshift-virtualization-os-images namespace):
+#
+#   oc apply -n default -f vms/windows2k8sp2-x86-installer.yaml
+#
+# Includes the Windows ISO import and a pinned legacy VirtIO container disk (v1.4.0-2).
+# Its 2k8 driver files match the tested downstream 1.9.12 ISO byte for byte.
+# It also includes the compatible QEMU Guest Agent 7.6.2 for both architectures.
+# Newer VirtIO containers omit 2k8, even when their ISO label says 1.9.12.
+# Details and media verification: docs/legacy-windows.md.
+# At "Press any key to boot from CD or DVD", press a key once in the VNC console.
+# Setup installs drivers and the guest agent, then Sysprep generalizes and shuts down.
+# Clone the root disk only after that shutdown; the DataSource itself is not a completion signal.
+# Attach a separate sysprep Secret containing your unattend.xml when creating each clone.
+# Clones use the windows.2k8.virtio preference and modern VirtIO devices; see docs/cloning.md.
+# One active MBR Windows partition keeps C: stable through Sysprep and clone first boot.
+# The amd64 KubeVirt architecture also hosts the 32-bit x86 Windows guest.
+# Supply the Administrator password and other per-VM settings at clone creation; see docs/cloning.md.
+# If using another VM namespace, update the golden-image DataSource's source PVC namespace.
+# Setup downloads and verifies Microsoft KB968930 (PowerShell 2.0), then installs signed drivers online.
+# Internet access to Microsoft Update is required. Logs: C:\virtio-driver-install.log and
+# C:\Windows\Temp\qemu-ga-install.log. No OpenSSH setup is required.
+# Cluster validation results are recorded in docs/testing.md.
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: windows2k8sp2-x86-installer
+spec:
+  dataVolumeTemplates:
+    - metadata:
+        name: windows2k8sp2-x86-installer-root-dv
+      spec:
+        source:
+          blank: {}
+        storage:
+          resources:
+            requests:
+              storage: 64Gi
+    - metadata:
+        name: windows2k8sp2-x86-installer-iso
+      spec:
+        source:
+          pvc:
+            name: windows2k8sp2-x86-iso
+            namespace: openshift-virtualization-os-images
+        storage:
+          resources: {}
+  runStrategy: RerunOnFailure
+  instancetype:
+    kind: VirtualMachineClusterInstancetype
+    name: u1.small
+  preference:
+    kind: VirtualMachineClusterPreference
+    name: windows.2k8.virtio
+  template:
+    spec:
+      architecture: amd64
+      domain:
+        devices:
+          # Server 2008 SP2 has no driver for the preference's VirtIO tablet.
+          autoattachInputDevice: false
+          disks:
+            - name: rootdisk
+              bootOrder: 1
+              disk: {}
+            - name: win-iso
+              bootOrder: 2
+              cdrom:
+                bus: sata
+            - name: windows-drivers-disk
+              cdrom:
+                bus: sata
+            - name: sysprep
+              cdrom:
+                bus: sata
+          interfaces:
+            - name: default
+              masquerade: {}
+      networks:
+        - name: default
+          pod: {}
+      volumes:
+        - name: rootdisk
+          dataVolume:
+            name: windows2k8sp2-x86-installer-root-dv
+        - name: win-iso
+          dataVolume:
+            name: windows2k8sp2-x86-installer-iso
+        - name: windows-drivers-disk
+          containerDisk:
+            # v1.4.0-2: keep this digest; newer images drop Server 2008 SP2 drivers.
+            image: registry.redhat.io/cnv-tech-preview/virtio-win@sha256:6ee05b1f81263da91eea6da1e93077752ecf4c293b3b255be63f4398578b2028
+        - name: sysprep
+          sysprep:
+            configMap:
+              name: windows2k8sp2-x86-autounattend
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: windows2k8sp2-x86-autounattend
+data:
+  autounattend.xml: |
+    <?xml version="1.0" encoding="utf-8"?>
+    <unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <settings pass="offlineServicing">
+        <component name="Microsoft-Windows-PnpCustomizationsNonWinPE" processorArchitecture="x86" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <DriverPaths>
+            <PathAndCredentials wcm:action="add" wcm:keyValue="1">
+              <Path>E:\NetKVM\2k8\x86</Path>
+            </PathAndCredentials>
+          </DriverPaths>
+        </component>
+      </settings>
+      <settings pass="windowsPE">
+        <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="x86" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <SetupUILanguage>
+            <UILanguage>en-US</UILanguage>
+          </SetupUILanguage>
+          <InputLocale>0409:00000409</InputLocale>
+          <SystemLocale>en-US</SystemLocale>
+          <UILanguage>en-US</UILanguage>
+          <UserLocale>en-US</UserLocale>
+        </component>
+        <component name="Microsoft-Windows-PnpCustomizationsWinPE" processorArchitecture="x86" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <DriverPaths>
+            <PathAndCredentials wcm:action="add" wcm:keyValue="1">
+              <Path>E:\viostor\2k8\x86</Path>
+            </PathAndCredentials>
+          </DriverPaths>
+        </component>
+        <component name="Microsoft-Windows-Setup" processorArchitecture="x86" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <DiskConfiguration>
+            <WillShowUI>OnError</WillShowUI>
+            <Disk wcm:action="add">
+              <CreatePartitions>
+                <CreatePartition wcm:action="add">
+                  <Order>1</Order>
+                  <Extend>true</Extend>
+                  <Type>Primary</Type>
+                </CreatePartition>
+              </CreatePartitions>
+              <ModifyPartitions>
+                <ModifyPartition wcm:action="add">
+                  <Format>NTFS</Format>
+                  <Order>1</Order>
+                  <PartitionID>1</PartitionID>
+                  <Label>Windows</Label>
+                  <Active>true</Active>
+                  <Letter>C</Letter>
+                </ModifyPartition>
+              </ModifyPartitions>
+              <DiskID>0</DiskID>
+              <WillWipeDisk>true</WillWipeDisk>
+            </Disk>
+          </DiskConfiguration>
+          <ImageInstall>
+            <OSImage>
+              <InstallFrom>
+                <MetaData wcm:action="add">
+                  <Key>/IMAGE/INDEX</Key>
+                  <Value>1</Value>
+                </MetaData>
+              </InstallFrom>
+              <InstallTo>
+                <DiskID>0</DiskID>
+                <PartitionID>1</PartitionID>
+              </InstallTo>
+            </OSImage>
+          </ImageInstall>
+          <UserData>
+            <AcceptEula>true</AcceptEula>
+          </UserData>
+        </component>
+      </settings>
+      <settings pass="specialize">
+        <component name="Microsoft-Windows-International-Core" processorArchitecture="x86" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <InputLocale>0409:00000409</InputLocale>
+          <SystemLocale>en-US</SystemLocale>
+          <UILanguage>en-US</UILanguage>
+          <UserLocale>en-US</UserLocale>
+        </component>
+      </settings>
+      <settings pass="oobeSystem">
+        <component name="Microsoft-Windows-Deployment" processorArchitecture="x86" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <Reseal>
+            <Mode>Audit</Mode>
+          </Reseal>
+        </component>
+      </settings>
+      <settings pass="auditUser">
+        <component name="Microsoft-Windows-Deployment" processorArchitecture="x86" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <RunSynchronous>
+            <RunSynchronousCommand wcm:action="add">
+              <Order>1</Order>
+              <Path>cmd /v:on /c "for %d in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do @if exist %d:\post-install.cmd (call %d:\post-install.cmd &amp; exit /b !errorlevel!)"</Path>
+              <Description>Install PowerShell, signed VirtIO drivers, and the QEMU guest agent</Description>
+              <WillReboot>OnRequest</WillReboot>
+            </RunSynchronousCommand>
+            <RunSynchronousCommand wcm:action="add">
+              <Order>2</Order>
+              <Path>cmd /v:on /c "for %d in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do @if exist %d:\generalize.cmd (call %d:\generalize.cmd &amp; exit /b !errorlevel!)"</Path>
+              <Description>Generalize the golden image and shut down</Description>
+              <WillReboot>Never</WillReboot>
+            </RunSynchronousCommand>
+          </RunSynchronous>
+        </component>
+      </settings>
+    </unattend>
+  post-install.cmd: |
+    @echo off
+    setlocal
+    rem Server 2008 SP2 has no inbox PowerShell. Use the same WMF Core package as virtio-compatibility.
+    rem HTTP accommodates the original OS TLS stack; verify the pinned SHA-1 supported by this certutil; WUSA also verifies Microsoft signatures.
+    set "PACKAGE=%WINDIR%\Temp\Windows6.0-KB968930-x86.msu"
+    if exist "%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe" goto drivers
+    bitsadmin.exe /transfer WMFCore /download /priority foreground http://catalog.s.download.windowsupdate.com/msdownload/update/software/updt/2011/02/windows6.0-kb968930-x86_16fd2e93be2e7265821191119ddfc0cdaa6f4243.msu "%PACKAGE%"
+    if errorlevel 1 exit /b 3
+    set "HASH="
+    for /f "skip=1 tokens=*" %%h in ('certutil.exe -hashfile "%PACKAGE%"') do if not defined HASH set "HASH=%%h"
+    set "HASH=%HASH: =%"
+    if /i not "%HASH%"=="16fd2e93be2e7265821191119ddfc0cdaa6f4243" exit /b 3
+    start "" /wait wusa.exe "%PACKAGE%" /quiet /norestart
+    set "RESULT=%ERRORLEVEL%"
+    if not "%RESULT%"=="0" if not "%RESULT%"=="3010" exit /b 3
+    if not exist "%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe" exit /b 3
+    :drivers
+    rem Use the full path: this process inherited PATH before WMF Core was installed.
+    rem Online installation runs the KMDF co-installers; offline staging alone leaves KMDF 1.7.
+    "%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe" -ExecutionPolicy Bypass -NoProfile -File "%~dp0install-virtio-drivers.ps1" -WinVer 2k8 -Arch x86
+    if errorlevel 1 exit /b 3
+    rem Reboot to activate KMDF before Sysprep. auditUser resumes at the next command.
+    exit /b 1
+  install-virtio-drivers.ps1: |
+    <#
+    Based on the virtio-compatibility driver installer. Runs in audit mode after KB968930.
+    Finds all driver packages on the virtio-win ISO that match
+    the target Windows version, pre-checks their catalog signatures (to avoid pnputil's blocking
+    GUI prompt on unsigned/untrusted drivers), and installs the signed ones via pnputil.
+
+    Uses the legacy pnputil syntax (-i -a) required by Server 2012 R2 and earlier; the modern
+    /add-driver /install syntax is Windows 10 1607+ only.
+
+    A Valid Authenticode chain alone isn't enough to keep pnputil silent: non-hardware-class
+    packages (e.g. vioprot.inf's Network Protocol class) go through a separate interactive
+    "Would you like to install this device software?" prompt gated on the LocalMachine
+    TrustedPublisher store, not on chain trust. Once a catalog's signature is confirmed Valid
+    (chains to a trusted root), its signer is added to TrustedPublisher -- equivalent to a human
+    ticking "Always trust software from <publisher>" on that dialog -- so unattended installs of
+    that already-verified publisher's packages stop prompting. Certs that fail the Valid check
+    are never added and their drivers are skipped, so this only ever extends trust to publishers
+    that were already cryptographically trustworthy.
+
+    Usage (from post-install.cmd in audit mode):
+        powershell -ExecutionPolicy Bypass -File <drive>:\install-virtio-drivers.ps1 -WinVer 2k8 -Arch x86
+    #>
+
+    param(
+        [string]$WinVer = '2k8',
+        [string]$Arch = 'x86'
+    )
+
+    $LogFile = 'C:\virtio-driver-install.log'
+    $trustedThumbprints = @{}
+
+    function Write-Log {
+        param([string]$Message)
+        $line = '{0} {1}' -f (Get-Date -Format o), $Message
+        Write-Host $line
+        Add-Content -Path $LogFile -Value $line
+    }
+
+    Write-Log "=== Starting virtio driver installation for $WinVer/$Arch ==="
+
+    $VirtioRoot = $null
+    foreach ($drive in [System.IO.DriveInfo]::GetDrives()) {
+        if ($drive.DriveType -eq 'CDRom' -and $drive.IsReady) {
+            $testPath = Join-Path $drive.RootDirectory.FullName 'viostor'
+            if (Test-Path $testPath) {
+                $VirtioRoot = $drive.RootDirectory.FullName.TrimEnd('\')
+                break
+            }
+        }
+    }
+
+    if (-not $VirtioRoot) {
+        Write-Log 'ERROR: Could not find virtio-win ISO drive (no CD-ROM with a viostor directory)'
+        exit 1
+    }
+
+    Write-Log "Found virtio-win ISO at $VirtioRoot"
+
+    $searchPattern = Join-Path $VirtioRoot "*\$WinVer\$Arch\*.inf"
+    $infFiles = @(Get-ChildItem -Path $searchPattern -ErrorAction SilentlyContinue)
+
+    if ($infFiles.Count -eq 0) {
+        Write-Log "No .inf files found matching $searchPattern"
+        exit 1
+    }
+
+    Write-Log "Found $($infFiles.Count) driver package(s) to process"
+
+    $installed = 0
+    $skipped = 0
+    $alreadyBound = 0
+    $failed = 0
+
+    foreach ($inf in $infFiles) {
+        $driverName = Split-Path (Split-Path (Split-Path (Split-Path $inf.FullName -Parent) -Parent) -Parent) -Leaf
+
+        $catFiles = @(Get-ChildItem -Path $inf.DirectoryName -Filter '*.cat' -ErrorAction SilentlyContinue)
+
+        if ($catFiles.Count -eq 0) {
+            Write-Log "SKIP: $driverName ($($inf.Name)) - no .cat file found"
+            $skipped++
+            continue
+        }
+
+        $validSig = $false
+        $signerCert = $null
+        foreach ($cat in $catFiles) {
+            $sig = Get-AuthenticodeSignature -FilePath $cat.FullName
+            if ($sig.Status -eq 'Valid') {
+                $validSig = $true
+                $signerCert = $sig.SignerCertificate
+                Write-Log "SIGNED: $driverName - $($cat.Name) - $($sig.SignerCertificate.Subject)"
+                break
+            }
+
+            # UnknownError commonly means the signature itself is intact but the online
+            # revocation (CRL/OCSP) check failed or timed out -- observed taking 60+ seconds
+            # before failing closed in this NAT'd test VM, not that the chain is actually
+            # untrusted. Rebuild the chain offline (no revocation check) to tell a genuinely
+            # broken/untrusted chain apart from a network-dependent revocation check that
+            # simply couldn't be completed; a real signature failure (NotSigned, HashMismatch,
+            # NotTrusted) still falls through to the skip below.
+            if ($sig.Status -eq 'UnknownError' -and $sig.SignerCertificate) {
+                $chain = New-Object System.Security.Cryptography.X509Certificates.X509Chain
+                $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+                if ($chain.Build($sig.SignerCertificate)) {
+                    $validSig = $true
+                    $signerCert = $sig.SignerCertificate
+                    Write-Log "SIGNED: $driverName - $($cat.Name) - $($sig.SignerCertificate.Subject) (offline chain valid; online revocation check was unavailable)"
+                    break
+                }
+            }
+        }
+
+        if (-not $validSig) {
+            $lastStatus = (Get-AuthenticodeSignature -FilePath $catFiles[0].FullName).Status
+            Write-Log "SKIP: $driverName ($($inf.Name)) - signature status: $lastStatus"
+            $skipped++
+            continue
+        }
+
+        # Chain-of-trust valid (Status -eq 'Valid') is necessary but not sufficient to keep
+        # pnputil silent for non-hardware-class packages -- see header comment. Only a signer
+        # that already passed the Valid check above is added to TrustedPublisher.
+        if (-not $trustedThumbprints.ContainsKey($signerCert.Thumbprint)) {
+            $store = New-Object System.Security.Cryptography.X509Certificates.X509Store('TrustedPublisher', 'LocalMachine')
+            $store.Open('ReadWrite')
+            $store.Add($signerCert)
+            $store.Close()
+            $trustedThumbprints[$signerCert.Thumbprint] = $true
+            Write-Log "TRUSTED: added $($signerCert.Subject) (thumbprint $($signerCert.Thumbprint)) to LocalMachine\TrustedPublisher"
+        }
+
+        Write-Log "INSTALLING: $driverName - pnputil.exe -i -a `"$($inf.FullName)`""
+        $output = & pnputil.exe -i -a "$($inf.FullName)" 2>&1
+        $exitCode = $LASTEXITCODE
+
+        foreach ($line in $output) {
+            Write-Log "  $line"
+        }
+
+        if ($exitCode -eq 0) {
+            Write-Log "OK: $driverName installed successfully"
+            $installed++
+        } elseif ($exitCode -eq 259 -or ($exitCode -eq 1 -and ($driverName -eq 'NetKVM' -or $driverName -eq 'viostor'))) {
+            # ERROR_NO_MORE_ITEMS: the package staged into the driver store fine, but no present
+            # device needs it -- expected for viostor/NetKVM, already bound via the boot-time
+            # PnpCustomizationsWinPE DriverPaths in autounattend.xml. Not a real failure.
+            Write-Log "ALREADY BOUND: $driverName - no device needs this driver (likely already bound)"
+            $alreadyBound++
+        } else {
+            Write-Log "FAIL: $driverName - pnputil exit code $exitCode"
+            $failed++
+        }
+    }
+
+    Write-Log "=== Summary: $installed installed, $alreadyBound already bound (no device needed it), $skipped skipped (unsigned/no catalog), $failed failed ==="
+
+    if ($failed -gt 0 -or $skipped -gt 0) { exit 3 }
+
+    # This pinned image supplies the independently tested QEMU guest agent 7.6.2.
+    $msi = Join-Path $VirtioRoot 'guest-agent\qemu-ga-i386.msi'
+    $arguments = '/i "' + $msi + '" /qn /norestart /l*v C:\Windows\Temp\qemu-ga-install.log'
+    $result = Start-Process msiexec.exe -Wait -PassThru -ArgumentList $arguments
+    if ($result.ExitCode -ne 0 -and $result.ExitCode -ne 3010) {
+        Write-Log ('ERROR: QEMU guest-agent MSI returned ' + $result.ExitCode)
+        exit 3
+    }
+    if (-not (Get-Service QEMU-GA -ErrorAction SilentlyContinue)) { exit 3 }
+    Write-Log 'QEMU guest agent installed; reboot before generalizing.'
+    exit 0
+  generalize.cmd: |
+    @echo off
+    setlocal
+    rem Keep the installation answer for reference, but let each clone use its own unattend.xml.
+    if exist "%WINDIR%\Panther\unattend.xml" (
+      move /y "%WINDIR%\Panther\unattend.xml" "%WINDIR%\Panther\unattend.install.xml" >nul
+      if errorlevel 1 exit /b 3
+    )
+    start "" /wait "%WINDIR%\System32\Sysprep\Sysprep.exe" /generalize /oobe /shutdown
+    if errorlevel 1 exit /b 3
+    exit /b 0
+---
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataVolume
+metadata:
+  name: windows2k8sp2-x86-iso
+  namespace: openshift-virtualization-os-images
+  annotations:
+    cdi.kubevirt.io/storage.bind.immediate.requested: 'true'
+spec:
+  source:
+    http:
+      url: https://archive.org/download/Windows_Server_2008_SP2_x86.iso_reupload/Windows_Server_2008_SP2_x86.iso
+  storage:
+    resources:
+      requests:
+        storage: 4Gi
+---
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataSource
+metadata:
+  name: windows2k8sp2-x86-iso
+  namespace: openshift-virtualization-os-images
+  labels:
+    template.kubevirt.io/architecture: amd64
+    kubevirt.io/iso: 'true'
+spec:
+  source:
+    pvc:
+      name: windows2k8sp2-x86-iso
+      namespace: openshift-virtualization-os-images
+---
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataSource
+metadata:
+  name: windows2k8sp2-x86-golden-image
+  labels:
+    template.kubevirt.io/architecture: amd64
+spec:
+  source:
+    pvc:
+      name: windows2k8sp2-x86-installer-root-dv
+      namespace: default
