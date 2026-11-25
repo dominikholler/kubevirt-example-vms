@@ -80,14 +80,12 @@ generalize and shut down.
 The single active Windows partition is an intentional difference from the compatibility
 repository's two-partition installation tests. On NT 6.0, the separate System Reserved
 partition could take `C:` after generalization and move Windows to `D:`, causing Setup to
-reject the image's registry paths. Hiding that partition avoided the letter conflict but
-still failed the clone's component-configuration phase.
+reject the image's registry paths.
 The media-discovery command explicitly propagates the script's exit code. A plain
 `cmd /c for ...` loop returned zero even when its child requested a reboot with exit code 1,
 so Setup immediately launched Sysprep with KMDF 1.7 still installed. The corrected wrapper
 uses delayed expansion and `exit /b !errorlevel!`, allowing Setup to reboot and activate
-KMDF 1.9 before generalization. Preserving device installations alone did not fix that
-missing reboot and is not used.
+KMDF 1.9 before generalization.
 Only clone the golden-image DataSource after shutdown. The clone needs the root disk
 and matching firmware and VirtIO disk/network models, plus a new Sysprep volume with your
 `unattend.xml`.

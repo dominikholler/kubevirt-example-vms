@@ -1,0 +1,288 @@
+# Windows Server 2025 (Evaluation) VM, installed unattended from the Microsoft ISO.
+# Includes the shared Windows Server 2025 ISO import below.
+# For more VMs, change all "windows2k25-installer" names, or use separate namespaces.
+#
+#   oc apply -n default -f vms/windows2k25-installer.yaml
+#
+# The first boot stops at "Press any key to boot from CD or DVD": press a key in the VNC console.
+# Supply the Administrator password and other per-VM settings at clone creation; see docs/cloning.md.
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: windows2k25-installer
+spec:
+  dataVolumeTemplates:
+    - metadata:
+        name: windows2k25-installer-root-dv
+      spec:
+        source:
+          blank: {}
+        storage:
+          resources:
+            requests:
+              storage: 64Gi
+    - metadata:
+        name: windows2k25-installer-iso
+      spec:
+        source:
+          pvc:
+            name: windows2k25-iso
+            namespace: openshift-virtualization-os-images
+        storage:
+          resources: {}
+  runStrategy: RerunOnFailure
+  instancetype:
+    name: u1.large
+  preference:
+    name: windows.2k25.virtio
+  template:
+    spec:
+      domain:
+        devices:
+          interfaces:
+            - name: default
+              model: virtio
+              masquerade: {}
+          disks:
+            - bootOrder: 1
+              disk:
+                bus: virtio
+              name: rootdisk
+            - bootOrder: 2
+              cdrom:
+                bus: sata
+              name: win-iso
+            - cdrom:
+                bus: sata
+              name: windows-drivers-disk
+            - cdrom:
+                bus: sata
+              name: sysprep
+      networks:
+        - name: default
+          pod: {}
+      volumes:
+        - dataVolume:
+            name: windows2k25-installer-root-dv
+          name: rootdisk
+        - dataVolume:
+            name: windows2k25-installer-iso
+          name: win-iso
+        - name: sysprep
+          sysprep:
+            configMap:
+              name: windows2k25-autounattend
+        - containerDisk:
+            image: >-
+              registry.redhat.io/container-native-virtualization/virtio-win-rhel9:v4.22
+          name: windows-drivers-disk
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: windows2k25-autounattend
+data:
+  # Windows Setup answer file: installs Windows, runs post-install.ps1 in audit mode, generalizes.
+  autounattend.xml: |
+    <?xml version="1.0" encoding="utf-8"?>
+    <unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <settings pass="windowsPE">
+        <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <SetupUILanguage>
+            <UILanguage>en-US</UILanguage>
+          </SetupUILanguage>
+          <InputLocale>0409:00000409</InputLocale>
+          <SystemLocale>en-US</SystemLocale>
+          <UILanguage>en-US</UILanguage>
+          <UserLocale>en-US</UserLocale>
+        </component>
+        <component name="Microsoft-Windows-PnpCustomizationsWinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <DriverPaths>
+            <PathAndCredentials wcm:action="add" wcm:keyValue="1">
+                    <Path>E:\viostor\2k25\amd64</Path>
+            </PathAndCredentials>
+          </DriverPaths>
+        </component>
+        <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <DiskConfiguration>
+            <WillShowUI>OnError</WillShowUI>
+            <Disk wcm:action="add">
+                  <CreatePartitions>
+                        <CreatePartition wcm:action="add">
+                            <Order>1</Order>
+                            <Size>260</Size>
+                            <Type>EFI</Type>
+                        </CreatePartition>
+                        <CreatePartition wcm:action="add">
+                            <Order>2</Order>
+                            <Size>16</Size>
+                            <Type>MSR</Type>
+                        </CreatePartition>
+                        <CreatePartition wcm:action="add">
+                            <Order>3</Order>
+                            <Size>2048</Size>
+                            <Type>Primary</Type>
+                        </CreatePartition>
+                        <CreatePartition wcm:action="add">
+                            <Size>61440</Size>
+                            <Order>4</Order>
+                            <Type>Primary</Type>
+                        </CreatePartition>
+                    </CreatePartitions>
+                    <ModifyPartitions>
+                        <ModifyPartition wcm:action="add">
+                            <Format>FAT32</Format>
+                            <Order>1</Order>
+                            <PartitionID>1</PartitionID>
+                        </ModifyPartition>
+                        <!-- The MSR partition cannot be modified. -->
+                        <ModifyPartition wcm:action="add">
+                            <Format>NTFS</Format>
+                            <Order>2</Order>
+                            <PartitionID>3</PartitionID>
+                            <TypeID>de94bba4-06d1-4d40-a16a-bfd50179d6ac</TypeID>
+                            <Label>Recovery</Label>
+                        </ModifyPartition>
+                        <ModifyPartition wcm:action="add">
+                            <Format>NTFS</Format>
+                            <Order>3</Order>
+                            <PartitionID>4</PartitionID>
+                            <Label>Windows</Label>
+                        </ModifyPartition>
+                    </ModifyPartitions>
+              <DiskID>0</DiskID>
+              <WillWipeDisk>true</WillWipeDisk>
+            </Disk>
+          </DiskConfiguration>
+          <ImageInstall>
+            <OSImage>
+              <InstallFrom>
+                <MetaData wcm:action="add">
+                  <!-- 2 = Windows Server 2025 Standard Evaluation (Desktop Experience) -->
+                  <Key>/IMAGE/INDEX</Key>
+                  <Value>2</Value>
+                </MetaData>
+              </InstallFrom>
+              <InstallTo>
+                <DiskID>0</DiskID>
+                <PartitionID>4</PartitionID>
+              </InstallTo>
+            </OSImage>
+          </ImageInstall>
+          <UserData>
+            <AcceptEula>true</AcceptEula>
+            <ProductKey>
+              <Key/>
+            </ProductKey>
+          </UserData>
+        </component>
+      </settings>
+      <settings pass="specialize">
+        <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <InputLocale>0409:00000409</InputLocale>
+          <SystemLocale>en-US</SystemLocale>
+          <UILanguage>en-US</UILanguage>
+          <UserLocale>en-US</UserLocale>
+        </component>
+      </settings>
+      <settings pass="oobeSystem">
+        <component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <Reseal>
+            <Mode>Audit</Mode>
+          </Reseal>
+        </component>
+      </settings>
+      <settings pass="auditUser">
+        <component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <RunSynchronous>
+            <RunSynchronousCommand wcm:action="add">
+              <Order>1</Order>
+              <Path>cmd /v:on /c "for %d in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do @if exist %d:\post-install.ps1 (powershell -ExecutionPolicy Bypass -NoProfile -File %d:\post-install.ps1 &amp; exit /b !errorlevel!)"</Path>
+              <Description>Run post-install script</Description>
+              <WillReboot>OnRequest</WillReboot>
+            </RunSynchronousCommand>
+            <RunSynchronousCommand wcm:action="add">
+              <Order>2</Order>
+              <Path>cmd /c move /y C:\Windows\Panther\unattend.xml C:\Windows\Panther\unattend.install.xml</Path>
+              <Description>Rename the cached installation answer</Description>
+            </RunSynchronousCommand>
+          </RunSynchronous>
+          <Generalize>
+            <ForceShutdownNow>true</ForceShutdownNow>
+            <Mode>OOBE</Mode>
+          </Generalize>
+        </component>
+      </settings>
+    </unattend>
+  post-install.ps1: |
+    try {
+        $ErrorActionPreference = 'Stop'
+        Start-Transcript -Path C:\Windows\Temp\post-install.log -Append
+        $rebootRequired = $false
+        function Install-Msi([string]$Path, [string]$Log) {
+            $result = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/i `"$Path`" /qn /norestart /l*v `"$Log`""
+            if ($result.ExitCode -eq 3010) { $script:rebootRequired = $true }
+            elseif ($result.ExitCode -ne 0) { throw "MSI installation failed ($($result.ExitCode)): $Path" }
+        }
+        # Install drivers and the QEMU guest agent, checking each installer result.
+        # Locate driver media again after reboot; CD-ROM letters can change.
+        $driverRoot = Get-PSDrive -PSProvider FileSystem | Where-Object { Test-Path (Join-Path $_.Root 'virtio-win-gt-x64.msi') } | Select-Object -First 1 -ExpandProperty Root
+        if (-not $driverRoot) { throw 'VirtIO driver media was not found.' }
+        Install-Msi (Join-Path $driverRoot 'virtio-win-gt-x64.msi') 'C:\Windows\Temp\virtio-tools-install.log'
+        Install-Msi (Join-Path $driverRoot 'guest-agent\qemu-ga-x86_64.msi') 'C:\Windows\Temp\qemu-ga-install.log'
+        Stop-Transcript
+        # WillReboot=OnRequest: reboot before the next auditUser command if an MSI requested it.
+        if ($rebootRequired) { exit 1 }
+        exit 0
+    } catch {
+        Write-Error $_ -ErrorAction Continue
+        # OnRequest reserves exit codes 1 and 2 for reboots; 3 signals failure.
+        exit 3
+    }
+
+---
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataVolume
+metadata:
+  name: windows2k25-iso
+  namespace: openshift-virtualization-os-images
+  annotations:
+    cdi.kubevirt.io/storage.bind.immediate.requested: 'true'
+spec:
+  source:
+    http:
+      url: "https://software-static.download.prss.microsoft.com/dbazure/998969d5-f34g-4e03-ac9d-1f9786c66749/26100.32230.260111-0550.lt_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso"
+  storage:
+    resources:
+      requests:
+        storage: 10Gi
+---
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataSource
+metadata:
+  name: windows2k25-iso
+  namespace: openshift-virtualization-os-images
+  labels:
+    kubevirt.io/iso: 'true'
+    template.kubevirt.io/architecture: amd64
+    instancetype.kubevirt.io/default-instancetype: u1.large
+    instancetype.kubevirt.io/default-preference: windows.2k25.virtio
+spec:
+  source:
+    pvc:
+      name: windows2k25-iso
+      namespace: openshift-virtualization-os-images
+---
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataSource
+metadata:
+  name: windows2k25-golden-image
+  labels:
+    template.kubevirt.io/architecture: amd64
+    instancetype.kubevirt.io/default-instancetype: u1.large
+    instancetype.kubevirt.io/default-preference: windows.2k25.virtio
+spec:
+  source:
+    pvc:
+      name: windows2k25-installer-root-dv
+      namespace: default
