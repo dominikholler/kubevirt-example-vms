@@ -3,8 +3,11 @@
 Validation started on 2026-11-25 on the supplied disposable OpenShift Virtualization cluster:
 OpenShift Virtualization 5.0.1, KubeVirt 1.9.0, Kubernetes 1.36.5, and the default `managed-csi`
 Azure block storage class. All test resources use namespace `kubevirt-examples-test-20261125`.
+The Server 2008 R2, Server 2012, and Server 2012 R2 examples were added and validated on
+2026-11-26 on another cluster built from the same versions and storage class, using
+namespace `default`.
 
-**All four examples passed the installer and clone checks below.** A running VMI alone
+**All seven examples passed the installer and clone checks below.** A running VMI alone
 is not considered a passing test.
 
 | Example | Observed result |
@@ -13,8 +16,11 @@ is not considered a passing test.
 | Windows 11 installer | Passed offline WinPE installation, native generalization and shutdown, creation-time answer, 80 GiB GPT clone expansion, DHCP, guest-agent checks, and device checks. |
 | Server 2008 SP2 x64 | Passed fresh installation with the cluster preference and modern VirtIO, rename-only Sysprep, creation-time answer, 80 GiB expansion, DHCP, agent 7.6.2, PowerShell 2.0, and KMDF 1.9. |
 | Server 2008 SP2 x86 | Passed fresh installation with the cluster preference and modern VirtIO, rename-only Sysprep, creation-time answer, 80 GiB expansion, DHCP, agent 7.6.2, PowerShell 2.0, and KMDF 1.9. |
+| Server 2008 R2 x64 | Passed fresh installation with the cluster preference and modern VirtIO, audit-mode driver install (8 installed, `viostor` already bound, `NetKVM` staged by Setup, 0 skipped/failed), rename-only Sysprep, creation-time answer, 80 GiB expansion, DHCP, agent 7.6.2, and the VirtIO tablet. |
+| Server 2012 x64 | Passed fresh installation of Standard (Full) with the cluster preference and modern VirtIO, audit-mode driver install on the modern media (10 installed, `NetKVM` and `viostor` already bound, 0 skipped/failed), native generalization, creation-time answer, 80 GiB expansion, DHCP, and agent 110.2.3. |
+| Server 2012 R2 x64 | Passed fresh installation of Standard (Full) with the cluster preference and modern VirtIO, audit-mode driver install on the modern media (11 installed, `NetKVM` and `viostor` already bound, 0 skipped/failed), native generalization, creation-time answer, 80 GiB expansion, DHCP, and agent 110.2.3. |
 
-All four installer manifests pass YAML/XML parsing and Kubernetes server-side dry-run validation.
+All seven installer manifests pass YAML/XML parsing and Kubernetes server-side dry-run validation.
 All Windows ISO imports succeeded. Modern driver images and the pinned legacy driver image
 pulled successfully. VSOCK is absent; no cluster-wide VSOCK feature gate was enabled.
 
@@ -27,13 +33,14 @@ pulled successfully. VSOCK is absent; no cluster-wide VSOCK feature gate was ena
 - Use one active MBR Windows partition for legacy guests to keep `C:` stable through
   Sysprep. Propagate script exit codes through the media-discovery loop so Windows Setup
   actually reboots before generalization and completes the KMDF update.
-- Use `windows.2k8.virtio` for both legacy architectures. Omit `useVirtioTransitional`: the
-  pinned drivers support modern PCI IDs, and both clones boot with non-transitional devices.
-  Set `autoattachInputDevice: false` because the preference's VirtIO tablet and KubeVirt's
-  alternative USB/xHCI tablet have no compatible driver. PS/2 input remains available.
+- Use `windows.2k8.virtio` for all three legacy examples. Omit `useVirtioTransitional`: the
+  pinned drivers support modern PCI IDs, and the clones boot with non-transitional devices.
+  Set `autoattachInputDevice: false` for Server 2008 SP2 because the preference's VirtIO
+  tablet and KubeVirt's alternative USB/xHCI tablet have no compatible driver there;
+  Server 2008 R2 keeps the tablet because the pinned media ships its `vioinput` driver.
 - Use the verified legacy container described in [legacy-windows.md](legacy-windows.md).
-  Its 66 relevant driver files match the reference 1.9.12 ISO byte for byte, and its agent
-  is the separately compatible version 7.6.2.
+  Its 66 `2k8` driver files and 40 `2k8R2` driver files match the reference 1.9.12 ISO by
+  name, size, and CRC-32, and its agent is the separately compatible version 7.6.2.
 - Check MSI results and use Windows Setup's
   [`WillReboot=OnRequest`](https://learn.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-deployment-runsynchronous-runsynchronouscommand-willreboot)
   return-code semantics:
@@ -47,6 +54,24 @@ pulled successfully. VSOCK is absent; no cluster-wide VSOCK feature gate was ena
   loads only `viostor` in WinPE; `ipconfig /all` confirmed no network adapters during
   installation. Its network driver is installed later in audit mode.
 - Give the Server 2025 ISO import 10 GiB to accommodate the ISO and filesystem overhead.
+- Select the full-GUI image by name on the Server 2012 evaluation media: `/IMAGE/INDEX` 1
+  installs Server Core. `Windows Server 2012 SERVERSTANDARD` and
+  `Windows Server 2012 R2 SERVERSTANDARD` select Standard (Full).
+- Run the client-server driver step with the modern virtio-win container but the legacy
+  `pnputil -i -a` syntax on the 2012 pair. Those OSes verify the media's SHA-256 catalogs
+  natively, and the modern `/add-driver /install` syntax is unavailable before Windows 10
+  1607.
+- Use the answer file's native `Generalize` block for the 2012 pair, as for Windows 11 and
+  Server 2025. No Sysprep script or second reboot is needed beyond the driver reboot.
+- Handle catalogs that the guest cannot verify when Setup already staged the package: in
+  the pinned media, `NetKVM`'s catalog is SHA-256 signed through a root that a fresh
+  Server 2008 R2 lacks. Windows Setup injects the same package during offline servicing,
+  so the Server 2008 R2 script counts a package already present in the driver store as
+  installed. Treating that skip as a failure aborted Setup with "could not parse or
+  process unattend answer file ... for pass [auditUser]".
+- Skip the Windows Management Framework download on Server 2008 R2 (inbox PowerShell 2.0)
+  and keep its VirtIO tablet enabled, because the pinned media ships a Server 2008 R2
+  `vioinput` driver. `/IMAGE/INDEX` 1 selects Standard (Full) on the multi-edition media.
 
 ## How the tests were run
 
@@ -67,9 +92,30 @@ flow. The legacy runs also used fresh disks with the pinned container, cluster p
 and modern VirtIO; their script CDs were refreshed for the rename-only step. Their final
 clones used `autoattachInputDevice: false`, and all tested VirtIO devices worked.
 
+For Server 2008 R2, one key press was sent at the DVD prompt through the VNC console and
+progress was inspected with `virtctl vnc screenshot`; the rest of Setup ran unattended.
+The stopped golden disk was inspected offline with libguestfs: the driver log reported the
+summary above, the guest-agent MSI returned 0, `Panther\unattend.install.xml` replaced
+`Panther\unattend.xml`, and the `NetKVM` package was present in the driver store. Its
+verification clone used the golden-image DataSource with an 80 GiB volume and a Sysprep
+Secret. It booted unattended to the desktop as Windows Server 2008 R2 Standard, applied
+the supplied computer name, expanded its single NTFS partition to 80G (`virt-filesystems`
+on the stopped clone disk), obtained the masquerade network's 10.0.2.2/24 address, and
+connected guest agent 7.6.2.
+
+The 2012 pair was installed in parallel with the same procedure. The stopped golden disks
+reported the driver summaries above, agent 110.2.3 installed successfully, and the registry
+confirmed `Windows Server 2012 Standard Evaluation` / `Windows Server 2012 R2 Standard
+Evaluation` with the full shell (`explorer.exe` present). Native generalization left
+`Panther\unattend.install.xml` and a processed `Panther\unattend.xml` marked
+`wasPassProcessed="true"`. Their verification clones, also run in parallel, booted to the
+Server Manager desktop, applied the supplied computer names, expanded the single NTFS
+partition to 80G, obtained 10.0.2.2/24 from the masquerade network, and connected agent
+110.2.3.
+
 Temporary verification VMs, their owned disks, answer Secrets, and inspection pods were
-removed. Four stopped installer VMs retain the verified golden disks, exposed through their
-`*-golden-image` DataSources in the test namespace.
+removed. The stopped installer VMs retain the verified golden disks, exposed through their
+`*-golden-image` DataSources.
 
 For a server-side validation in your intended namespace:
 
@@ -84,13 +130,15 @@ DataSource; DataSource readiness does not indicate that Windows installation has
 ## Answer files in the golden disks
 
 Read-only inspection confirmed that the legacy images retain `Panther\unattend.install.xml`
-and have no `Panther\unattend.xml`. Native generalization in Windows 11 and Server 2025
-recreates `Panther\unattend.xml`, marking its specialize, OOBE, and audit passes with
-`wasPassProcessed="true"`. The installation backup also remains. This processed cache
-contains no clone-specific computer name, password, or other personalization.
+and have no `Panther\unattend.xml`. Native generalization in Windows 11, Server 2025,
+Server 2012, and Server 2012 R2 recreates `Panther\unattend.xml`, marking its specialize,
+OOBE, and audit passes with `wasPassProcessed="true"`. The installation backup also
+remains. This processed cache contains no clone-specific computer name, password, or other
+personalization.
 
-Both modern clones consumed a new Secret-backed `unattend.xml`: they applied the supplied
-computer names, completed unattended OOBE, and reached `IMAGE_STATE_COMPLETE`.
+The Windows 11, Server 2025, Server 2012, and Server 2012 R2 clones consumed a new
+Secret-backed `unattend.xml`: they applied the supplied computer names and completed
+unattended OOBE.
 The native flow therefore meets the creation-time customization requirement; it does not
 promise that no file named `unattend.xml` exists anywhere in the golden image.
 
@@ -100,3 +148,8 @@ Server 2008 SP2 reports `ACPI\QEMU0002` (QEMU firmware configuration) as an unkn
 device. The tested storage, network, serial, balloon, and PS/2 input devices work.
 PowerShell 2.0 works interactively, but launching it through this old QEMU agent returned
 no output; native `cmd.exe`/WMIC and the console were used for legacy verification.
+
+Server 2008 R2's agent 7.6.2 connects and reports its version and network interfaces, but
+`virtctl guestosinfo` returns empty OS fields and `virtctl fslist` reports zero byte counts.
+The computer name and the expanded partition were therefore verified offline from the
+stopped clone disk (registry hive and `virt-filesystems`).
