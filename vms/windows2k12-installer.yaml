@@ -83,7 +83,7 @@ spec:
         - name: windows-drivers-disk
           containerDisk:
             # Modern virtio-win media: complete 2k12/2k12R2 drivers and a current guest agent.
-            image: registry.redhat.io/container-native-virtualization/virtio-win-rhel9:v4.22
+            image: registry.redhat.io/container-native-virtualization/virtio-win-rhel9:v4.22@sha256:077ab5a47571deafab8e557864dbaafbbd40014840f8167333776144fad17f46
         - name: sysprep
           sysprep:
             configMap:

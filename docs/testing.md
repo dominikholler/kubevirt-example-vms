@@ -16,7 +16,7 @@ is not considered a passing test.
 | Windows 11 installer | Passed offline WinPE installation, native generalization and shutdown, creation-time answer, 80 GiB GPT clone expansion, DHCP, guest-agent checks, and device checks. |
 | Server 2008 SP2 x64 | Passed fresh installation with the cluster preference and modern VirtIO, rename-only Sysprep, creation-time answer, 80 GiB expansion, DHCP, agent 7.6.2, PowerShell 2.0, and KMDF 1.9. |
 | Server 2008 SP2 x86 | Passed fresh installation with the cluster preference and modern VirtIO, rename-only Sysprep, creation-time answer, 80 GiB expansion, DHCP, agent 7.6.2, PowerShell 2.0, and KMDF 1.9. |
-| Server 2008 R2 x64 | Passed fresh installation with the cluster preference and modern VirtIO, audit-mode driver install (8 installed, `viostor` already bound, `NetKVM` staged by Setup, 0 skipped/failed), rename-only Sysprep, creation-time answer, 80 GiB expansion, DHCP, agent 7.6.2, and the VirtIO tablet. |
+| Server 2008 R2 x64 | Passed fresh installation with the cluster preference and modern VirtIO, audit-mode driver install (8 installed, `viostor` already bound, `NetKVM` staged by Setup, 0 skipped/failed), native generalization, creation-time answer, 80 GiB expansion, DHCP, agent 7.6.2, and the VirtIO tablet. |
 | Server 2012 x64 | Passed fresh installation of Standard (Full) with the cluster preference and modern VirtIO, audit-mode driver install on the modern media (10 installed, `NetKVM` and `viostor` already bound, 0 skipped/failed), native generalization, creation-time answer, 80 GiB expansion, DHCP, and agent 110.2.3. |
 | Server 2012 R2 x64 | Passed fresh installation of Standard (Full) with the cluster preference and modern VirtIO, audit-mode driver install on the modern media (11 installed, `NetKVM` and `viostor` already bound, 0 skipped/failed), native generalization, creation-time answer, 80 GiB expansion, DHCP, and agent 110.2.3. |
 
@@ -48,8 +48,10 @@ pulled successfully. VSOCK is absent; no cluster-wide VSOCK feature gate was ena
   The scripts return 3 on failure so Setup stops for inspection instead of generalizing.
 - Rename the cached `Panther\unattend.xml` to `unattend.install.xml` before Sysprep. Supply a separate `unattend.xml` when creating
   each clone, as described in [cloning.md](cloning.md).
-- Use Windows Setup's native `Generalize` block in both modern examples. The driver step
-  handles required reboots before a short command renames the cached installation answer.
+- Use Windows Setup's native `Generalize` block for Server 2008 R2 and later, including the
+  modern examples. The driver step handles required reboots before a short command renames
+  the cached installation answer. The Server 2008 SP2 examples keep the explicit Sysprep
+  script that this project verified.
 - Install only VirtIO drivers and the QEMU guest agent in the modern examples. Windows 11
   loads only `viostor` in WinPE; `ipconfig /all` confirmed no network adapters during
   installation. Its network driver is installed later in audit mode.
@@ -71,7 +73,8 @@ pulled successfully. VSOCK is absent; no cluster-wide VSOCK feature gate was ena
   process unattend answer file ... for pass [auditUser]".
 - Skip the Windows Management Framework download on Server 2008 R2 (inbox PowerShell 2.0)
   and keep its VirtIO tablet enabled, because the pinned media ships a Server 2008 R2
-  `vioinput` driver. `/IMAGE/INDEX` 1 selects Standard (Full) on the multi-edition media.
+  `vioinput` driver. `/IMAGE/NAME` selects `Windows Server 2008 R2 SERVERSTANDARD` on the
+  multi-edition media.
 
 ## How the tests were run
 
@@ -89,19 +92,22 @@ use 7.6.2. All clones reached `IMAGE_STATE_COMPLETE`.
 
 The modern examples were installed from fresh disks with the final native-generalization
 flow. The legacy runs also used fresh disks with the pinned container, cluster preference,
-and modern VirtIO; their script CDs were refreshed for the rename-only step. Their final
+and modern VirtIO; the Server 2008 SP2 script CDs were refreshed for the rename-only step.
+Server 2008 R2 and the later examples use native generalization, which needs no such step.
+Their final
 clones used `autoattachInputDevice: false`, and all tested VirtIO devices worked.
 
 For Server 2008 R2, one key press was sent at the DVD prompt through the VNC console and
 progress was inspected with `virtctl vnc screenshot`; the rest of Setup ran unattended.
 The stopped golden disk was inspected offline with libguestfs: the driver log reported the
-summary above, the guest-agent MSI returned 0, `Panther\unattend.install.xml` replaced
-`Panther\unattend.xml`, and the `NetKVM` package was present in the driver store. Its
-verification clone used the golden-image DataSource with an 80 GiB volume and a Sysprep
-Secret. It booted unattended to the desktop as Windows Server 2008 R2 Standard, applied
-the supplied computer name, expanded its single NTFS partition to 80G (`virt-filesystems`
-on the stopped clone disk), obtained the masquerade network's 10.0.2.2/24 address, and
-connected guest agent 7.6.2.
+summary above, the guest-agent MSI returned 0, the cached `Panther\unattend.xml` was renamed
+to `unattend.install.xml` and native generalization recreated a processed `Panther\unattend.xml`
+marked `wasPassProcessed="true"`, and the `NetKVM` package was present in the driver store.
+Its verification clone used the golden-image DataSource with an 80 GiB volume and a Sysprep
+Secret. It booted unattended to the desktop as Windows Server 2008 R2 Standard; Initial
+Configuration Tasks showed `win2k8r2-clone` and a DHCP-assigned IPv4 address, the single
+NTFS partition had expanded to 80G (`virt-filesystems` on the stopped clone disk), and guest
+agent 7.6.2 connected.
 
 The 2012 pair was installed in parallel with the same procedure. The stopped golden disks
 reported the driver summaries above, agent 110.2.3 installed successfully, and the registry
@@ -129,16 +135,16 @@ DataSource; DataSource readiness does not indicate that Windows installation has
 
 ## Answer files in the golden disks
 
-Read-only inspection confirmed that the legacy images retain `Panther\unattend.install.xml`
-and have no `Panther\unattend.xml`. Native generalization in Windows 11, Server 2025,
-Server 2012, and Server 2012 R2 recreates `Panther\unattend.xml`, marking its specialize,
-OOBE, and audit passes with `wasPassProcessed="true"`. The installation backup also
-remains. This processed cache contains no clone-specific computer name, password, or other
-personalization.
+Read-only inspection confirmed that the Server 2008 SP2 images retain
+`Panther\unattend.install.xml` and have no `Panther\unattend.xml`. Native generalization in
+Server 2008 R2, Windows 11, Server 2025, Server 2012, and Server 2012 R2 recreates
+`Panther\unattend.xml`, marking its specialize, OOBE, and audit passes with
+`wasPassProcessed="true"`. The installation backup also remains. This processed cache
+contains no clone-specific computer name, password, or other personalization.
 
-The Windows 11, Server 2025, Server 2012, and Server 2012 R2 clones consumed a new
-Secret-backed `unattend.xml`: they applied the supplied computer names and completed
-unattended OOBE.
+The Server 2008 R2, Windows 11, Server 2025, Server 2012, and Server 2012 R2 clones
+consumed a new Secret-backed `unattend.xml`: they applied the supplied computer names and
+completed unattended OOBE.
 The native flow therefore meets the creation-time customization requirement; it does not
 promise that no file named `unattend.xml` exists anywhere in the golden image.
 

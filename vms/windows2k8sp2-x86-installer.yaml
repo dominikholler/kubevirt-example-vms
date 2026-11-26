@@ -89,7 +89,7 @@ spec:
         - name: windows-drivers-disk
           containerDisk:
             # v1.4.0-2: keep this digest; newer images drop Server 2008 SP2 drivers.
-            image: registry.redhat.io/cnv-tech-preview/virtio-win@sha256:6ee05b1f81263da91eea6da1e93077752ecf4c293b3b255be63f4398578b2028
+            image: registry.redhat.io/cnv-tech-preview/virtio-win:v1.4.0-2@sha256:6ee05b1f81263da91eea6da1e93077752ecf4c293b3b255be63f4398578b2028
         - name: sysprep
           sysprep:
             configMap:

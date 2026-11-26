@@ -28,7 +28,8 @@ drivers that Setup already injected; the script accepts that code for `viostor` 
 ## Windows Server 2008 R2
 
 The Server 2008 R2 example installs Standard (Full), SP1, from Microsoft's multi-edition
-media; `/IMAGE/INDEX` 1 selects Standard. Server 2008 R2 has inbox PowerShell 2.0, so no
+media; `/IMAGE/NAME` selects `Windows Server 2008 R2 SERVERSTANDARD`. Server 2008 R2 has
+inbox PowerShell 2.0, so no
 Windows Management Framework download is required, and its `pnputil` returns 259 for the
 already-bound `viostor` driver like the Server 2012 family.
 
@@ -49,11 +50,14 @@ installed.
 
 ## Pinned driver container
 
-The examples use `registry.redhat.io/cnv-tech-preview/virtio-win:v1.4.0-2`, pinned by digest:
+The examples reference
+`registry.redhat.io/cnv-tech-preview/virtio-win:v1.4.0-2` and pin the digest:
 
 ```text
 sha256:6ee05b1f81263da91eea6da1e93077752ecf4c293b3b255be63f4398578b2028
 ```
+
+The tag keeps the manifest readable; the digest makes the pull immutable.
 
 No driver ISO upload is needed. The cluster must be able to pull from `registry.redhat.io`;
 credentials are supplied by the cluster, not embedded in these public manifests. Windows
@@ -123,9 +127,11 @@ injected by Setup, following the reference's documented finding; Server 2008 R2 
 `ERROR_NO_MORE_ITEMS` code 259 for the same drivers. Other install failures stop the workflow
 before Sysprep.
 
-After agent installation, Setup reboots before the next `auditUser` command. That command
-renames the cached `Panther\unattend.xml` to `unattend.install.xml` and runs Sysprep to
-generalize and shut down.
+After agent installation, Setup reboots before the next `auditUser` command. On Server 2008
+R2 that command renames the cached `Panther\unattend.xml` to `unattend.install.xml`, and the
+answer file's native `Generalize` block then generalizes in OOBE mode and shuts the VM down.
+No Sysprep script is needed. The two Server 2008 SP2 examples keep their explicit Sysprep
+script, the path verified for that OS.
 The single active Windows partition is an intentional difference from the compatibility
 repository's two-partition installation tests. On NT 6.0, the separate System Reserved
 partition could take `C:` after generalization and move Windows to `D:`, causing Setup to

@@ -86,7 +86,7 @@ spec:
           containerDisk:
             # v1.4.0-2: the tested legacy media for this OS. Newer images re-signed their
             # catalogs with SHA-256 only, which a fresh Server 2008 R2 cannot verify.
-            image: registry.redhat.io/cnv-tech-preview/virtio-win@sha256:6ee05b1f81263da91eea6da1e93077752ecf4c293b3b255be63f4398578b2028
+            image: registry.redhat.io/cnv-tech-preview/virtio-win:v1.4.0-2@sha256:6ee05b1f81263da91eea6da1e93077752ecf4c293b3b255be63f4398578b2028
         - name: sysprep
           sysprep:
             configMap:
@@ -155,8 +155,8 @@ data:
             <OSImage>
               <InstallFrom>
                 <MetaData wcm:action="add">
-                  <Key>/IMAGE/INDEX</Key>
-                  <Value>1</Value>
+                  <Key>/IMAGE/NAME</Key>
+                  <Value>Windows Server 2008 R2 SERVERSTANDARD</Value>
                 </MetaData>
               </InstallFrom>
               <InstallTo>
@@ -196,11 +196,15 @@ data:
             </RunSynchronousCommand>
             <RunSynchronousCommand wcm:action="add">
               <Order>2</Order>
-              <Path>cmd /v:on /c "for %d in (D E F G H I J K L M N O P Q R S T U V W X Y Z) do @if exist %d:\generalize.cmd (call %d:\generalize.cmd &amp; exit /b !errorlevel!)"</Path>
-              <Description>Generalize the golden image and shut down</Description>
+              <Path>cmd /c move /y C:\Windows\Panther\unattend.xml C:\Windows\Panther\unattend.install.xml</Path>
+              <Description>Rename the cached installation answer</Description>
               <WillReboot>Never</WillReboot>
             </RunSynchronousCommand>
           </RunSynchronous>
+          <Generalize>
+            <ForceShutdownNow>true</ForceShutdownNow>
+            <Mode>OOBE</Mode>
+          </Generalize>
         </component>
       </settings>
     </unattend>
@@ -413,17 +417,6 @@ data:
     if (-not (Get-Service QEMU-GA -ErrorAction SilentlyContinue)) { exit 3 }
     Write-Log 'QEMU guest agent installed; reboot before generalizing.'
     exit 0
-  generalize.cmd: |
-    @echo off
-    setlocal
-    rem Keep the installation answer for reference, but let each clone use its own unattend.xml.
-    if exist "%WINDIR%\Panther\unattend.xml" (
-      move /y "%WINDIR%\Panther\unattend.xml" "%WINDIR%\Panther\unattend.install.xml" >nul
-      if errorlevel 1 exit /b 3
-    )
-    start "" /wait "%WINDIR%\System32\Sysprep\Sysprep.exe" /generalize /oobe /shutdown
-    if errorlevel 1 exit /b 3
-    exit /b 0
 ---
 apiVersion: cdi.kubevirt.io/v1beta1
 kind: DataVolume

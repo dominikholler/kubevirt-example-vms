@@ -25,8 +25,10 @@ KubeVirt's default BIOS firmware instead of adding a `firmware` block.
 Both examples use the same container disk as the Windows 11 and Server 2025 examples:
 
 ```text
-registry.redhat.io/container-native-virtualization/virtio-win-rhel9:v4.22
+registry.redhat.io/container-native-virtualization/virtio-win-rhel9:v4.22@sha256:077ab5a47571deafab8e557864dbaafbbd40014840f8167333776144fad17f46
 ```
+
+The tag keeps the manifest readable; the digest pins the pull.
 
 It ships complete `2k12` and `2k12R2` driver trees. Server 2012 (NT 6.2) and Server 2012 R2
 (NT 6.3) verify the media's SHA-256 catalogs natively, so no servicing updates are needed.
