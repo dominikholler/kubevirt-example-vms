@@ -1,6 +1,8 @@
 # kubevirt-example-vms
 
-Unattended Windows guest installers for OpenShift Virtualization / KubeVirt. Each manifest
+A collection of practical, unattended Windows VM installation examples for KubeVirt and OpenShift Virtualization.
+Each example demonstrates how to install Windows, configure VirtIO drivers, generalize the installation and publish
+a reusable golden image for cloning. Each manifest
 imports its installation ISO, creates a golden-image DataSource, and installs Windows without
 interaction except for a single key press at the DVD prompt. The installers generalize the
 image and shut the VM down, ready to be cloned.
