@@ -123,6 +123,16 @@ Temporary verification VMs, their owned disks, answer Secrets, and inspection po
 removed. The stopped installer VMs retain the verified golden disks, exposed through their
 `*-golden-image` DataSources.
 
+## Templates
+
+The native `VirtualMachineTemplate` files in `templates/` apply cleanly to the cluster, and
+`virtctl template process` renders valid VMs from them (checked with `--print-params` and a
+rendered VM spec for each). The Server 2012 R2 template was also instantiated end to end:
+`virtctl template process windows2k12r2-golden-vm -p NAME=tmplw2k12r2 --create` produced a VM
+that cloned the golden DataSource into an 80 GiB root disk, booted to the Server Manager
+desktop, applied the shared `windows2k12r2-answer` ConfigMap, obtained 10.0.2.2/24, and
+connected the guest agent. The test VM and template objects were removed afterwards.
+
 For a server-side validation in your intended namespace:
 
 ```sh

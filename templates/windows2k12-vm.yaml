@@ -1,0 +1,121 @@
+# Windows Server 2012 golden-image template with its creation-time answer included.
+# Apply into the VM's namespace, then create and start a VM:
+#   oc apply -n default -f templates/windows2k12-vm.yaml
+#   virtctl template process windows2k12-golden-vm -p NAME=myvm --create
+#   virtctl start myvm
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: windows2k12-answer
+data:
+  unattend.xml: |
+    <?xml version="1.0" encoding="utf-8"?>
+    <unattend xmlns="urn:schemas-microsoft-com:unattend">
+      <settings pass="specialize">
+        <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <ComputerName>*</ComputerName>
+        </component>
+        <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <InputLocale>0409:00000409</InputLocale>
+          <SystemLocale>en-US</SystemLocale>
+          <UILanguage>en-US</UILanguage>
+          <UserLocale>en-US</UserLocale>
+        </component>
+        <component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <ExtendOSPartition>
+            <Extend>true</Extend>
+          </ExtendOSPartition>
+        </component>
+      </settings>
+      <settings pass="oobeSystem">
+        <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+          <OOBE>
+            <HideEULAPage>true</HideEULAPage>
+            <NetworkLocation>Work</NetworkLocation>
+            <SkipUserOOBE>true</SkipUserOOBE>
+            <SkipMachineOOBE>true</SkipMachineOOBE>
+            <ProtectYourPC>3</ProtectYourPC>
+          </OOBE>
+          <AutoLogon>
+            <Password>
+              <Value>123456</Value>
+              <PlainText>true</PlainText>
+            </Password>
+            <Enabled>true</Enabled>
+            <Username>Administrator</Username>
+            <LogonCount>1</LogonCount>
+          </AutoLogon>
+          <UserAccounts>
+            <AdministratorPassword>
+              <Value>123456</Value>
+              <PlainText>true</PlainText>
+            </AdministratorPassword>
+          </UserAccounts>
+          <RegisteredOrganization />
+          <RegisteredOwner />
+          <TimeZone>Eastern Standard Time</TimeZone>
+        </component>
+      </settings>
+    </unattend>
+---
+apiVersion: template.kubevirt.io/v1beta1
+kind: VirtualMachineTemplate
+metadata:
+  name: windows2k12-golden-vm
+spec:
+  parameters:
+    - name: NAME
+      description: Virtual machine name, also used for its root disk
+      generate: expression
+      from: 'w2k12-[a-z0-9]{6}'
+    - name: GOLDEN_IMAGE_NAMESPACE
+      description: Namespace that contains the golden-image DataSource
+      value: default
+  virtualMachine:
+    metadata:
+      name: ${NAME}
+    spec:
+      runStrategy: Halted
+      instancetype:
+        kind: VirtualMachineClusterInstancetype
+        name: u1.large
+      preference:
+        kind: VirtualMachineClusterPreference
+        name: windows.2k12.virtio
+      dataVolumeTemplates:
+        - metadata:
+            name: ${NAME}-root
+          spec:
+            sourceRef:
+              kind: DataSource
+              name: windows2k12-golden-image
+              namespace: ${GOLDEN_IMAGE_NAMESPACE}
+            storage:
+              resources:
+                requests:
+                  storage: 80Gi
+      template:
+        spec:
+          domain:
+            devices:
+              disks:
+                - name: rootdisk
+                  bootOrder: 1
+                  disk: {}
+                - name: sysprep
+                  cdrom:
+                    bus: sata
+              interfaces:
+                - name: default
+                  masquerade: {}
+          networks:
+            - name: default
+              pod: {}
+          volumes:
+            - name: rootdisk
+              dataVolume:
+                name: ${NAME}-root
+            - name: sysprep
+              sysprep:
+                configMap:
+                  name: windows2k12-answer
